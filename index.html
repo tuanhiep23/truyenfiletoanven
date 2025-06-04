@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ứng dụng truyền file</title>
+<style>
+  :root {
+    --primary-color: #4a90e2;
+    --secondary-color: #50e3c2;
+    --background-color: #f4f7fa;
+    --text-color: #333333;
+    --btn-hover: #357ABD;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--background-color);
+    margin: 0; padding: 0;
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    min-height: 100vh;
+  }
+  main {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    max-width: 420px;
+    padding: 2rem;
+    margin: 2rem 1rem;
+    flex-grow: 1;
+    min-height: 560px;
+    display: flex;
+    flex-direction: column;
+  }
+  h1 {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: var(--primary-color);
+  }
+  label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  input[type="text"],
+  input[type="file"] {
+    width: 100%;
+    padding: 0.5rem;
+    border: 2px solid var(--secondary-color);
+    border-radius: 6px;
+    font-size: 1rem;
+    transition: border-color 0.3s ease;
+    margin-bottom: 1rem;
+  }
+  input[type="text"]:focus,
+  input[type="file"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+  }
+  button {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    font-weight: 600;
+    transition: background-color 0.3s ease;
+    margin-bottom: 1rem;
+  }
+  button:hover {
+    background-color: var(--btn-hover);
+  }
+  #status {
+    margin-top: auto;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-weight: 600;
+    min-height: 1.3em;
+  }
+  #status.success {
+    background-color: #d4edda;
+    color: #155724;
+  }
+  #status.error {
+    background-color: #f8d7da;
+    color: #721c24;
+  }
+  #receivedFiles {
+    overflow-y: auto;
+    max-height: 200px;
+    border: 1px solid var(--secondary-color);
+    border-radius: 8px;
+    padding: 0.5rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+  }
+  #receivedFiles div {
+    margin-bottom: 0.5rem;
+  }
+  @media (max-width:480px) {
+    main {
+      max-width: 90vw;
+      margin: 1rem auto;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ứng dụng truyền file</h1>
+  <div id="loginSection">
+    <label for="usernameInput">Nhập username của bạn:</label>
+    <input type="text" id="usernameInput" placeholder="Ví dụ: user1" />
+    <button id="loginBtn">Đăng nhập</button>
+  </div>
+
+  <div id="appSection" style="display:none;">
+    <label for="receiverInput">Nhập username người nhận:</label>
+    <input type="text" id="receiverInput" placeholder="Ví dụ: user2" />
+
+    <label for="fileInput">Chọn file để gửi:</label>
+    <input type="file" id="fileInput" />
+
+    <button id="sendFileBtn">Gửi file</button>
+
+    <div id="status"></div>
+    <h3>File đã nhận:</h3>
+    <div id="receivedFiles"></div>
+  </div>
+</main>
+
+<script>
+  const loginSection = document.getElementById('loginSection');
+  const appSection = document.getElementById('appSection');
+  const usernameInput = document.getElementById('usernameInput');
+  const loginBtn = document.getElementById('loginBtn');
+  const receiverInput = document.getElementById('receiverInput');
+  const fileInput = document.getElementById('fileInput');
+  const sendFileBtn = document.getElementById('sendFileBtn');
+  const statusDiv = document.getElementById('status');
+  const receivedFilesDiv = document.getElementById('receivedFiles');
+
+  let ws;
+  let username = null;
+
+  function setStatus(message, type='') {
+    statusDiv.textContent = message;
+    statusDiv.className = type;
+  }
+
+  function connectWebSocket() {
+    ws = new WebSocket('ws://localhost:8765');
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      setStatus('Đã kết nối tới máy chủ WebSocket', 'success');
+      if(username) {
+        sendLogin(username);
+      }
+    };
+
+    ws.onclose = () => {
+      setStatus('Mất kết nối tới máy chủ WebSocket', 'error');
+      // Tự động kết nối lại sau 3 giây
+      setTimeout(connectWebSocket, 3000);
+    };
+
+    ws.onerror = () => {
+      setStatus('Lỗi kết nối WebSocket', 'error');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.status === 'success' && data.message) {
+          setStatus(data.message, 'success');
+        } else if (data.status === 'error') {
+          setStatus(data.message, 'error');
+        }
+
+        if(data.command === 'receive_file') {
+          addReceivedFile(data.sender, data.filename, data.filedata);
+          setStatus(`Bạn đã nhận file '${data.filename}' từ '${data.sender}'`, 'success');
+        }
+      } catch (e) {
+        setStatus('Dữ liệu nhận được không hợp lệ', 'error');
+      }
+    };
+  }
+
+  async function sha256(buffer) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function sendLogin(name) {
+    if(ws && ws.readyState === WebSocket.OPEN) {
+      const loginMsg = {
+        command: "login",
+        username: name.trim()
+      };
+      ws.send(JSON.stringify(loginMsg));
+    }
+  }
+
+  loginBtn.onclick = () => {
+    const name = usernameInput.value.trim();
+    if(name.length < 1) {
+      setStatus('Vui lòng nhập username hợp lệ', 'error');
+      return;
+    }
+    username = name;
+    if(ws && ws.readyState === WebSocket.OPEN) {
+      sendLogin(username);
+    }
+  };
+
+  sendFileBtn.onclick = async () => {
+    if(!username) {
+      setStatus('Bạn chưa đăng nhập.', 'error');
+      return;
+    }
+    if(!receiverInput.value.trim()) {
+      setStatus('Vui lòng nhập username người nhận.', 'error');
+      return;
+    }
+    if(fileInput.files.length === 0) {
+      setStatus('Vui lòng chọn file để gửi.', 'error');
+      return;
+    }
+    if(!ws || ws.readyState !== WebSocket.OPEN) {
+      setStatus('WebSocket chưa kết nối.', 'error');
+      return;
+    }
+
+    const receiver = receiverInput.value.trim();
+    const file = fileInput.files[0];
+
+    setStatus(`Đang đọc file '${file.name}' và tính checksum...`);
+
+    const arrayBuffer = await file.arrayBuffer();
+    const checksum = await sha256(arrayBuffer);
+
+    const fileBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(reader.result.split(",")[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const sendMsg = {
+      command: "send_file",
+      sender: username,
+      receiver,
+      filename: file.name,
+      filedata: fileBase64,
+      checksum
+    };
+
+    ws.send(JSON.stringify(sendMsg));
+    setStatus(`Đang gửi file '${file.name}' đến '${receiver}'...`);
+  };
+
+  function addReceivedFile(sender, filename, filedata) {
+    // Giải mã filedata base64 thành blob và tạo link download
+    const binary = atob(filedata);
+    const array = [];
+    for(let i=0; i<binary.length; i++) {
+      array.push(binary.charCodeAt(i));
+    }
+    const blob = new Blob([new Uint8Array(array)]);
+
+    const url = URL.createObjectURL(blob);
+    const div = document.createElement('div');
+    div.innerHTML = `<strong>${filename}</strong> từ <em>${sender}</em> - <a href="${url}" download="${filename}">Tải xuống</a>`;
+    receivedFilesDiv.appendChild(div);
+  }
+
+  // Cập nhật hiển thị sau khi đăng nhập thành công
+  function onLoginSuccess() {
+    loginSection.style.display = 'none';
+    appSection.style.display = 'block';
+    setStatus('');
+  }
+
+  // Lắng nghe tin nhắn để biết đăng nhập thành công
+  function onMessageListener(e) {
+    try {
+      const data = JSON.parse(e.data);
+      if(data.status === "success" && data.message && data.message.includes("Đăng nhập thành công")) {
+        onLoginSuccess();
+      }
+    } catch {}
+  }
+
+  connectWebSocket();
+
+  // Thêm listener để cập nhật UI sau khi WS mở
+  ws && ws.addEventListener('message', onMessageListener);
+
+</script>
+</body>
+</html>
